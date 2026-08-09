@@ -222,6 +222,7 @@ function templateNewView() {
         </div>
         <label>Entries
           <textarea name="entries" required placeholder="Coffee spill&#10;Late to standup&#10;Zoom fail"></textarea>
+          <span class="entry-count" id="entry-count" aria-live="polite">0 entries</span>
         </label>
         <label style="font-weight:400">
           <span style="display:flex;gap:10px;align-items:center">
@@ -284,17 +285,18 @@ function recoverView() {
 
 function cardView(card) {
   const cells = Array.isArray(card.cells) ? card.cells : [];
+  const marked = cells.filter((c) => c.marked).length;
   return `
     <section>
       <h1>${escapeHtml(card.title || "Bingo card")}</h1>
       <div class="bingo-meta">
         <span>${card.rows}×${card.cols}</span>
-        <span>${cells.filter((c) => c.marked).length} marked</span>
+        <span id="marked-count">${marked} marked</span>
       </div>
       <div
         class="board"
         id="board"
-        style="grid-template-columns: repeat(${card.cols}, minmax(0, 1fr))"
+        style="--cols: ${card.cols}; --rows: ${card.rows}; grid-template-columns: repeat(${card.cols}, minmax(0, 1fr))"
         data-card-id="${card.id}"
       >
         ${cells
@@ -305,7 +307,7 @@ function cardView(card) {
             class="cell ${cell.marked ? "marked" : ""}"
             data-index="${i}"
             aria-pressed="${cell.marked ? "true" : "false"}"
-          >${escapeHtml(cell.text)}</button>`
+          ><span class="cell-text">${escapeHtml(cell.text)}</span></button>`
           )
           .join("")}
       </div>
@@ -471,11 +473,49 @@ async function loadCard(id) {
   bindBoard(data);
 }
 
+function fitCellText(cell) {
+  const label = cell.querySelector(".cell-text");
+  if (!label) return;
+  label.style.fontSize = "";
+  const maxPx = parseFloat(getComputedStyle(cell).fontSize) || 15.2;
+  const minPx = 8;
+  const availableH = Math.max(0, cell.clientHeight - 8);
+  const availableW = Math.max(0, cell.clientWidth - 8);
+  let size = maxPx;
+  label.style.fontSize = `${size}px`;
+  while (size > minPx && (label.scrollHeight > availableH || label.scrollWidth > availableW)) {
+    size -= 0.5;
+    label.style.fontSize = `${size}px`;
+  }
+}
+
+function fitBoardCells(board) {
+  if (!board) return;
+  board.querySelectorAll(".cell").forEach(fitCellText);
+}
+
+function updateMarkedCount(cells) {
+  const el = document.getElementById("marked-count");
+  if (!el) return;
+  const marked = cells.filter((c) => c.marked).length;
+  el.textContent = `${marked} marked`;
+}
+
+let boardResizeAbort = null;
+
 function bindBoard(card) {
   const board = document.getElementById("board");
   if (!board) return;
   let cells = Array.isArray(card.cells) ? structuredClone(card.cells) : [];
   let busy = new Set();
+
+  requestAnimationFrame(() => fitBoardCells(board));
+  if (boardResizeAbort) boardResizeAbort.abort();
+  boardResizeAbort = new AbortController();
+  window.addEventListener("resize", () => fitBoardCells(board), {
+    passive: true,
+    signal: boardResizeAbort.signal,
+  });
 
   board.addEventListener("click", async (event) => {
     const btn = event.target.closest(".cell");
@@ -488,6 +528,7 @@ function bindBoard(card) {
     cells[index].marked = nextMarked;
     btn.classList.toggle("marked", nextMarked);
     btn.setAttribute("aria-pressed", nextMarked ? "true" : "false");
+    updateMarkedCount(cells);
     btn.classList.add("pending");
     busy.add(index);
 
@@ -503,10 +544,38 @@ function bindBoard(card) {
       cells[index].marked = previous;
       btn.classList.toggle("marked", previous);
       btn.setAttribute("aria-pressed", previous ? "true" : "false");
+      updateMarkedCount(cells);
       toast(error.message || "Could not save mark", true);
       return;
     }
   });
+}
+
+function templateNeededEntries(form) {
+  const rows = Number(form.rows.value);
+  const cols = Number(form.cols.value);
+  const need = rows * cols;
+  const useFree = form.free.checked && rows % 2 === 1 && cols % 2 === 1;
+  return useFree ? need - 1 : need;
+}
+
+function updateEntryCount(form) {
+  const counter = document.getElementById("entry-count");
+  if (!counter) return;
+  const count = parseEntries(form.entries.value).length;
+  const needed = templateNeededEntries(form);
+  const label = count === 1 ? "entry" : "entries";
+  counter.textContent = `${count} ${label} · ${needed} needed`;
+  counter.classList.toggle("ready", count >= needed);
+}
+
+function bindTemplateForm(form) {
+  const refresh = () => updateEntryCount(form);
+  form.entries.addEventListener("input", refresh);
+  form.rows.addEventListener("change", refresh);
+  form.cols.addEventListener("change", refresh);
+  form.free.addEventListener("change", refresh);
+  refresh();
 }
 
 async function createTemplateFromForm(form) {
@@ -515,9 +584,9 @@ async function createTemplateFromForm(form) {
   const rows = Number(form.rows.value);
   const cols = Number(form.cols.value);
   const entries = parseEntries(form.entries.value);
-  const need = rows * cols;
-  const useFree = form.free.checked && rows % 2 === 1 && cols % 2 === 1;
-  const min = useFree ? need - 1 : need;
+  const oddGrid = rows % 2 === 1 && cols % 2 === 1;
+  const hasFree = form.free.checked && oddGrid;
+  const min = templateNeededEntries(form);
 
   if (entries.length < min) {
     throw new Error(`Enter at least ${min} entries for a ${rows}×${cols} board.`);
@@ -531,6 +600,7 @@ async function createTemplateFromForm(form) {
       rows,
       cols,
       entries,
+      has_free: hasFree,
       is_public: true,
     })
     .select("id")
@@ -550,7 +620,8 @@ async function createCardFromTemplate(templateId) {
   if (error) throw error;
   if (!template) throw new Error("Template not found.");
 
-  const cells = buildCellsFromTemplate(template, true);
+  const useFree = template.has_free !== false;
+  const cells = buildCellsFromTemplate(template, useFree);
   const { data: card, error: insertError } = await db
     .from("bingo_cards")
     .insert({
@@ -582,7 +653,9 @@ async function render() {
       await loadHome();
     } else if (r.name === "template-new") {
       view.innerHTML = templateNewView();
-      document.getElementById("template-form").addEventListener("submit", async (e) => {
+      const form = document.getElementById("template-form");
+      bindTemplateForm(form);
+      form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const btn = e.target.querySelector('button[type="submit"]');
         btn.disabled = true;
