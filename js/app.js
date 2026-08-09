@@ -9,14 +9,14 @@ const toastEl = document.getElementById("toast");
 
 let toastTimer = null;
 
-function toast(message, isError = false) {
+function toast(message, isError = false, duration = 2800) {
   toastEl.hidden = false;
   toastEl.textContent = message;
   toastEl.classList.toggle("error", isError);
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     toastEl.hidden = true;
-  }, 2800);
+  }, duration);
 }
 
 function escapeHtml(value) {
@@ -25,6 +25,45 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function templateShareUrl(templateId) {
+  const base = `${location.origin}${location.pathname}${location.search}`;
+  return `${base}#/cards/new/${templateId}`;
+}
+
+async function copyText(text, successMessage = "Copied", duration = 2800) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(successMessage, false, duration);
+    return true;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      toast(successMessage, false, duration);
+      return true;
+    } catch {
+      toast("Could not copy to clipboard", true);
+      return false;
+    } finally {
+      ta.remove();
+    }
+  }
+}
+
+async function shareTemplate(templateId) {
+  if (!templateId) {
+    toast("This card has no template to share", true);
+    return;
+  }
+  await copyText(templateShareUrl(templateId), "Share link copied");
 }
 
 function randomToken(bytes = 24) {
@@ -159,9 +198,13 @@ function homeView(owner, cards, templates) {
               .map(
                 (t) => `
             <li class="list-item">
-              <a href="#/cards/new/${t.id}" data-link>${escapeHtml(t.title || "Untitled template")}</a>
+              <span class="list-title">${escapeHtml(t.title || "Untitled template")}</span>
               <span class="meta">${t.rows}×${t.cols}</span>
-              <button type="button" class="btn danger btn-compact" data-delete-template="${t.id}">Delete</button>
+              <div class="list-actions">
+                <a class="btn btn-compact" href="#/cards/new/${t.id}" data-link>Create</a>
+                <button type="button" class="btn secondary btn-compact" data-share-template="${t.id}">Share</button>
+                <button type="button" class="btn danger btn-compact" data-delete-template="${t.id}">Delete</button>
+              </div>
             </li>`
               )
               .join("")}</ul>`
@@ -177,9 +220,12 @@ function homeView(owner, cards, templates) {
               .map(
                 (c) => `
             <li class="list-item">
-              <a href="#/cards/${c.id}" data-link>${escapeHtml(c.title || "Untitled card")}</a>
+              <span class="list-title">${escapeHtml(c.title || "Untitled card")}</span>
               <span class="meta">${c.rows}×${c.cols}</span>
-              <button type="button" class="btn danger btn-compact" data-delete-card="${c.id}">Delete</button>
+              <div class="list-actions">
+                <a class="btn btn-compact" href="#/cards/${c.id}" data-link>Play</a>
+                <button type="button" class="btn danger btn-compact" data-delete-card="${c.id}">Delete</button>
+              </div>
             </li>`
               )
               .join("")}</ul>`
@@ -250,8 +296,12 @@ function templatesView(templates) {
               .map(
                 (t) => `
             <li class="list-item">
-              <a href="#/cards/new/${t.id}" data-link>${escapeHtml(t.title)}</a>
+              <span class="list-title">${escapeHtml(t.title)}</span>
               <span class="meta">${t.rows}×${t.cols} · ${Array.isArray(t.entries) ? t.entries.length : 0} entries</span>
+              <div class="list-actions">
+                <a class="btn btn-compact" href="#/cards/new/${t.id}" data-link>Create</a>
+                <button type="button" class="btn secondary btn-compact" data-share-template="${t.id}">Share</button>
+              </div>
             </li>`
               )
               .join("")}</ul>`
@@ -260,6 +310,26 @@ function templatesView(templates) {
       <div class="btn-row">
         <a class="btn" href="#/templates/new" data-link>New template</a>
         <a class="btn secondary" href="#/" data-link>Home</a>
+      </div>
+    </section>
+  `;
+}
+
+function existingCardChoiceView(template, existingCard) {
+  return `
+    <section class="panel">
+      <h1>Card already exists</h1>
+      <p class="lede">
+        You already have a bingo card from
+        <strong>${escapeHtml(template.title || "this template")}</strong>.
+        Continue where you left off, or create a new shuffled card.
+      </p>
+      <div class="btn-row">
+        <a class="btn" href="#/cards/${existingCard.id}" data-link>Continue existing</a>
+        <button type="button" class="btn secondary" id="create-new-from-template" data-template-id="${template.id}">
+          Create new
+        </button>
+        <a class="btn secondary" href="#/" data-link>Cancel</a>
       </div>
     </section>
   `;
@@ -312,6 +382,11 @@ function cardView(card) {
           .join("")}
       </div>
       <div class="btn-row" style="margin-top:20px">
+        ${
+          card.template_id
+            ? `<button type="button" class="btn" id="share-card-template" data-share-template="${card.template_id}">Share</button>`
+            : ""
+        }
         <a class="btn secondary" href="#/" data-link>All cards</a>
       </div>
     </section>
@@ -339,28 +414,12 @@ function buildCellsFromTemplate(template, useFree) {
     .map((text) => ({ text, marked: false }));
 }
 
-async function copyRecoveryCode(code) {
-  try {
-    await navigator.clipboard.writeText(code);
-    toast("Recovery code copied");
-  } catch {
-    // Fallback for older browsers / insecure contexts
-    const ta = document.createElement("textarea");
-    ta.value = code;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      document.execCommand("copy");
-      toast("Recovery code copied");
-    } catch {
-      toast("Could not copy recovery code", true);
-    } finally {
-      ta.remove();
-    }
-  }
+function bindShareButtons(root = view) {
+  root.querySelectorAll("[data-share-template]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      shareTemplate(btn.dataset.shareTemplate);
+    });
+  });
 }
 
 async function deleteTemplate(templateId, ownerId) {
@@ -385,9 +444,11 @@ function bindHome(owner) {
   const recoveryBtn = document.getElementById("recovery-code");
   if (recoveryBtn) {
     recoveryBtn.addEventListener("click", () => {
-      copyRecoveryCode(owner.recovery_code);
+      copyText(owner.recovery_code, "Recovery code copied");
     });
   }
+
+  bindShareButtons();
 
   view.querySelectorAll("[data-delete-template]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -456,6 +517,7 @@ async function loadTemplates() {
     .order("created_at", { ascending: false });
   if (error) throw error;
   view.innerHTML = templatesView(data || []);
+  bindShareButtons();
 }
 
 async function loadCard(id) {
@@ -470,6 +532,7 @@ async function loadCard(id) {
     return;
   }
   view.innerHTML = cardView(data);
+  bindShareButtons();
   bindBoard(data);
 }
 
@@ -606,11 +669,53 @@ async function createTemplateFromForm(form) {
     .select("id")
     .single();
   if (error) throw error;
-  toast("Template created");
-  location.hash = `#/cards/new/${data.id}`;
+  await copyText(
+    templateShareUrl(data.id),
+    "Share link copied — template ready to share",
+    4500
+  );
+  await createCardFromTemplate(data.id, { force: true, notify: false });
 }
 
-async function createCardFromTemplate(templateId) {
+function bindExistingCardChoice(templateId) {
+  const btn = document.getElementById("create-new-from-template");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      view.innerHTML = `<p class="empty">Creating your card…</p>`;
+      await createCardFromTemplate(templateId, { force: true });
+    } catch (err) {
+      toast(err.message || "Failed to create card", true);
+      try {
+        await createCardFromTemplate(templateId, { force: false });
+      } catch (retryErr) {
+        view.innerHTML = `
+          <section class="panel">
+            <h1>Something went wrong</h1>
+            <div class="error-banner">${escapeHtml(retryErr.message || String(retryErr))}</div>
+            <a class="btn secondary" href="#/" data-link>Home</a>
+          </section>
+        `;
+      }
+    }
+  });
+}
+
+async function findExistingCardForTemplate(ownerId, templateId) {
+  const { data, error } = await db
+    .from("bingo_cards")
+    .select("id, title, updated_at")
+    .eq("owner_id", ownerId)
+    .eq("template_id", templateId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function createCardFromTemplate(templateId, { force = false, notify = true } = {}) {
   const owner = await ensureOwner();
   const { data: template, error } = await db
     .from("bingo_templates")
@@ -619,6 +724,15 @@ async function createCardFromTemplate(templateId) {
     .maybeSingle();
   if (error) throw error;
   if (!template) throw new Error("Template not found.");
+
+  if (!force) {
+    const existing = await findExistingCardForTemplate(owner.id, templateId);
+    if (existing) {
+      view.innerHTML = existingCardChoiceView(template, existing);
+      bindExistingCardChoice(templateId);
+      return;
+    }
+  }
 
   const useFree = template.has_free !== false;
   const cells = buildCellsFromTemplate(template, useFree);
@@ -635,7 +749,7 @@ async function createCardFromTemplate(templateId) {
     .select("id")
     .single();
   if (insertError) throw insertError;
-  toast("Card created");
+  if (notify) toast("Card created");
   location.hash = `#/cards/${card.id}`;
 }
 
