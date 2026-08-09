@@ -17,13 +17,17 @@ create table if not exists bingo_templates (
   cols int not null check (cols > 0),
   entries jsonb not null,
   has_free boolean not null default true,
-  is_public boolean not null default true,
+  is_public boolean not null default false,
   created_at timestamptz not null default now()
 );
 
 -- Safe for existing databases created before has_free existed.
 alter table bingo_templates
   add column if not exists has_free boolean not null default true;
+
+-- Prefer private-by-default for new templates going forward.
+alter table bingo_templates
+  alter column is_public set default false;
 
 create table if not exists bingo_cards (
   id uuid primary key default gen_random_uuid(),

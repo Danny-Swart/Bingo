@@ -192,7 +192,7 @@ function homeView(owner, cards, templates) {
 
     <section class="panel panel-templates">
       <h2>Your templates</h2>
-      <p class="section-sub">Blueprints you created. Share them with others, or create a new shuffled card from one.</p>
+      <p class="section-sub">Blueprints you created. Private ones stay off the public list and are only reachable via share link.</p>
       ${
         templates.length
           ? `<ul class="list">${templates
@@ -200,7 +200,7 @@ function homeView(owner, cards, templates) {
                 (t) => `
             <li class="list-item">
               <span class="list-title">${escapeHtml(t.title || "Untitled template")}</span>
-              <span class="meta">${t.rows}×${t.cols}</span>
+              <span class="meta">${t.rows}×${t.cols} · ${t.is_public ? "Public" : "Private"}</span>
               <div class="list-actions">
                 <a class="btn btn-compact" href="#/cards/new/${t.id}" data-link>Create</a>
                 <button type="button" class="btn share btn-compact" data-share-template="${t.id}">Share</button>
@@ -276,6 +276,12 @@ function templateNewView() {
           <span style="display:flex;gap:10px;align-items:center">
             <input type="checkbox" name="free" style="width:auto" checked />
             Pin a FREE space in the center when the grid is odd×odd
+          </span>
+        </label>
+        <label style="font-weight:400">
+          <span style="display:flex;gap:10px;align-items:center">
+            <input type="checkbox" name="private" style="width:auto" checked />
+            Keep this template private (only reachable via share link)
           </span>
         </label>
         <div class="btn-row">
@@ -501,7 +507,7 @@ async function loadHome() {
       .order("updated_at", { ascending: false }),
     db
       .from("bingo_templates")
-      .select("id, title, rows, cols, created_at")
+      .select("id, title, rows, cols, is_public, created_at")
       .eq("owner_id", owner.id)
       .order("created_at", { ascending: false }),
   ]);
@@ -651,6 +657,7 @@ async function createTemplateFromForm(form) {
   const entries = parseEntries(form.entries.value);
   const oddGrid = rows % 2 === 1 && cols % 2 === 1;
   const hasFree = form.free.checked && oddGrid;
+  const isPublic = !form.private.checked;
   const min = templateNeededEntries(form);
 
   if (entries.length < min) {
@@ -666,7 +673,7 @@ async function createTemplateFromForm(form) {
       cols,
       entries,
       has_free: hasFree,
-      is_public: true,
+      is_public: isPublic,
     })
     .select("id")
     .single();
