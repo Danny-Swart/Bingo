@@ -130,7 +130,7 @@ function renderConfigError() {
   `;
 }
 
-function homeView(owner, cards) {
+function homeView(owner, cards, templates) {
   return `
     <section class="hero">
       <h1>Make a board. Share a template. Mark as you go.</h1>
@@ -152,6 +152,24 @@ function homeView(owner, cards) {
     </section>
 
     <section class="panel">
+      <h2>Your templates</h2>
+      ${
+        templates.length
+          ? `<ul class="list">${templates
+              .map(
+                (t) => `
+            <li class="list-item">
+              <a href="#/cards/new/${t.id}" data-link>${escapeHtml(t.title || "Untitled template")}</a>
+              <span class="meta">${t.rows}×${t.cols}</span>
+              <button type="button" class="btn danger btn-compact" data-delete-template="${t.id}">Delete</button>
+            </li>`
+              )
+              .join("")}</ul>`
+          : `<p class="empty">No templates yet. Create one to share with others.</p>`
+      }
+    </section>
+
+    <section class="panel">
       <h2>Your cards</h2>
       ${
         cards.length
@@ -161,6 +179,7 @@ function homeView(owner, cards) {
             <li class="list-item">
               <a href="#/cards/${c.id}" data-link>${escapeHtml(c.title || "Untitled card")}</a>
               <span class="meta">${c.rows}×${c.cols}</span>
+              <button type="button" class="btn danger btn-compact" data-delete-card="${c.id}">Delete</button>
             </li>`
               )
               .join("")}</ul>`
@@ -170,8 +189,12 @@ function homeView(owner, cards) {
 
     <section class="recovery-box">
       <strong>Your recovery code</strong>
-      <div><code id="recovery-code">${escapeHtml(owner.recovery_code)}</code></div>
-      <p class="empty" style="margin-top:8px">Store this somewhere safe. Anyone with it can load your cards.</p>
+      <div>
+        <button type="button" class="recovery-code" id="recovery-code" title="Click to copy">
+          <code>${escapeHtml(owner.recovery_code)}</code>
+        </button>
+      </div>
+      <p class="empty" style="margin-top:8px">Click to copy. Store this somewhere safe. Anyone with it can load your cards.</p>
     </section>
   `;
 }
@@ -314,15 +337,113 @@ function buildCellsFromTemplate(template, useFree) {
     .map((text) => ({ text, marked: false }));
 }
 
+async function copyRecoveryCode(code) {
+  try {
+    await navigator.clipboard.writeText(code);
+    toast("Recovery code copied");
+  } catch {
+    // Fallback for older browsers / insecure contexts
+    const ta = document.createElement("textarea");
+    ta.value = code;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+      toast("Recovery code copied");
+    } catch {
+      toast("Could not copy recovery code", true);
+    } finally {
+      ta.remove();
+    }
+  }
+}
+
+async function deleteTemplate(templateId, ownerId) {
+  const { error } = await db
+    .from("bingo_templates")
+    .delete()
+    .eq("id", templateId)
+    .eq("owner_id", ownerId);
+  if (error) throw error;
+}
+
+async function deleteCard(cardId, ownerId) {
+  const { error } = await db
+    .from("bingo_cards")
+    .delete()
+    .eq("id", cardId)
+    .eq("owner_id", ownerId);
+  if (error) throw error;
+}
+
+function bindHome(owner) {
+  const recoveryBtn = document.getElementById("recovery-code");
+  if (recoveryBtn) {
+    recoveryBtn.addEventListener("click", () => {
+      copyRecoveryCode(owner.recovery_code);
+    });
+  }
+
+  view.querySelectorAll("[data-delete-template]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.deleteTemplate;
+      if (!id) return;
+      if (!confirm("Delete this template? Existing cards made from it stay, but the template will be gone.")) {
+        return;
+      }
+      btn.disabled = true;
+      try {
+        await deleteTemplate(id, owner.id);
+        toast("Template deleted");
+        await loadHome();
+      } catch (err) {
+        toast(err.message || "Could not delete template", true);
+        btn.disabled = false;
+      }
+    });
+  });
+
+  view.querySelectorAll("[data-delete-card]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.deleteCard;
+      if (!id) return;
+      if (!confirm("Delete this bingo card? This cannot be undone.")) {
+        return;
+      }
+      btn.disabled = true;
+      try {
+        await deleteCard(id, owner.id);
+        toast("Card deleted");
+        await loadHome();
+      } catch (err) {
+        toast(err.message || "Could not delete card", true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 async function loadHome() {
   const owner = await ensureOwner();
-  const { data: cards, error } = await db
-    .from("bingo_cards")
-    .select("id, title, rows, cols, updated_at")
-    .eq("owner_id", owner.id)
-    .order("updated_at", { ascending: false });
-  if (error) throw error;
-  view.innerHTML = homeView(owner, cards || []);
+  const [cardsRes, templatesRes] = await Promise.all([
+    db
+      .from("bingo_cards")
+      .select("id, title, rows, cols, updated_at")
+      .eq("owner_id", owner.id)
+      .order("updated_at", { ascending: false }),
+    db
+      .from("bingo_templates")
+      .select("id, title, rows, cols, created_at")
+      .eq("owner_id", owner.id)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (cardsRes.error) throw cardsRes.error;
+  if (templatesRes.error) throw templatesRes.error;
+  view.innerHTML = homeView(owner, cardsRes.data || [], templatesRes.data || []);
+  bindHome(owner);
 }
 
 async function loadTemplates() {

@@ -255,6 +255,13 @@ textarea {
   background: var(--danger);
 }
 
+.btn.btn-compact {
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
 .btn-row {
   display: flex;
   flex-wrap: wrap;
@@ -368,15 +375,32 @@ textarea {
   background: rgba(26, 32, 129, 0.35);
 }
 
-.recovery-box code {
+.recovery-code {
   display: inline-block;
   margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: filter var(--fast) var(--ease);
+}
+
+.recovery-code:hover {
+  filter: brightness(1.15);
+}
+
+.recovery-code code {
+  display: inline-block;
   padding: 8px 10px;
   border-radius: 8px;
   background: #1e2124;
   font-size: 0.95rem;
   letter-spacing: 0.04em;
   user-select: all;
+  pointer-events: none;
 }
 
 .toast {
