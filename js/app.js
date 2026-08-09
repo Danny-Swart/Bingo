@@ -190,8 +190,9 @@ function homeView(owner, cards, templates) {
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel panel-templates">
       <h2>Your templates</h2>
+      <p class="section-sub">Blueprints you created. Share them with others, or create a new shuffled card from one.</p>
       ${
         templates.length
           ? `<ul class="list">${templates
@@ -202,7 +203,7 @@ function homeView(owner, cards, templates) {
               <span class="meta">${t.rows}×${t.cols}</span>
               <div class="list-actions">
                 <a class="btn btn-compact" href="#/cards/new/${t.id}" data-link>Create</a>
-                <button type="button" class="btn secondary btn-compact" data-share-template="${t.id}">Share</button>
+                <button type="button" class="btn share btn-compact" data-share-template="${t.id}">Share</button>
                 <button type="button" class="btn danger btn-compact" data-delete-template="${t.id}">Delete</button>
               </div>
             </li>`
@@ -212,8 +213,9 @@ function homeView(owner, cards, templates) {
       }
     </section>
 
-    <section class="panel">
+    <section class="panel panel-cards">
       <h2>Your cards</h2>
+      <p class="section-sub">Boards you’re playing. Open one to mark squares as you go.</p>
       ${
         cards.length
           ? `<ul class="list">${cards
@@ -300,7 +302,7 @@ function templatesView(templates) {
               <span class="meta">${t.rows}×${t.cols} · ${Array.isArray(t.entries) ? t.entries.length : 0} entries</span>
               <div class="list-actions">
                 <a class="btn btn-compact" href="#/cards/new/${t.id}" data-link>Create</a>
-                <button type="button" class="btn secondary btn-compact" data-share-template="${t.id}">Share</button>
+                <button type="button" class="btn share btn-compact" data-share-template="${t.id}">Share</button>
               </div>
             </li>`
               )
@@ -384,7 +386,7 @@ function cardView(card) {
       <div class="btn-row" style="margin-top:20px">
         ${
           card.template_id
-            ? `<button type="button" class="btn" id="share-card-template" data-share-template="${card.template_id}">Share</button>`
+            ? `<button type="button" class="btn share" id="share-card-template" data-share-template="${card.template_id}">Share</button>`
             : ""
         }
         <a class="btn secondary" href="#/" data-link>All cards</a>
@@ -715,6 +717,21 @@ async function findExistingCardForTemplate(ownerId, templateId) {
   return data;
 }
 
+async function countCardsForTemplate(ownerId, templateId) {
+  const { count, error } = await db
+    .from("bingo_cards")
+    .select("id", { count: "exact", head: true })
+    .eq("owner_id", ownerId)
+    .eq("template_id", templateId);
+  if (error) throw error;
+  return count || 0;
+}
+
+function cardTitleForInstance(templateTitle, instanceNumber) {
+  const base = templateTitle || "Untitled card";
+  return instanceNumber <= 1 ? base : `${base} #${instanceNumber}`;
+}
+
 async function createCardFromTemplate(templateId, { force = false, notify = true } = {}) {
   const owner = await ensureOwner();
   const { data: template, error } = await db
@@ -734,6 +751,10 @@ async function createCardFromTemplate(templateId, { force = false, notify = true
     }
   }
 
+  const existingCount = await countCardsForTemplate(owner.id, templateId);
+  const instanceNumber = existingCount + 1;
+  const title = cardTitleForInstance(template.title, instanceNumber);
+
   const useFree = template.has_free !== false;
   const cells = buildCellsFromTemplate(template, useFree);
   const { data: card, error: insertError } = await db
@@ -741,7 +762,7 @@ async function createCardFromTemplate(templateId, { force = false, notify = true
     .insert({
       owner_id: owner.id,
       template_id: template.id,
-      title: template.title,
+      title,
       rows: template.rows,
       cols: template.cols,
       cells,
@@ -821,10 +842,6 @@ async function render() {
     `;
   }
 }
-
-document.getElementById("btn-recover-nav").addEventListener("click", () => {
-  location.hash = "#/recover";
-});
 
 window.addEventListener("hashchange", render);
 render();

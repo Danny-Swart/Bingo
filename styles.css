@@ -7,6 +7,8 @@
   --text-muted: rgba(255, 255, 255, 0.72);
   --accent: #1a2081;
   --danger: #ed4245;
+  --share: #f0b429;
+  --share-text: #1a1500;
   --marked: #3ba55d;
   --radius-sm: 12px;
   --radius-md: 16px;
@@ -52,7 +54,6 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   margin-bottom: 28px;
 }
 
@@ -97,7 +98,14 @@ h1 {
 h2 {
   font-size: 1.25rem;
   font-weight: 700;
-  margin: 0 0 12px;
+  margin: 0 0 6px;
+}
+
+.section-sub {
+  color: var(--text-muted);
+  margin: 0 0 16px;
+  max-width: 36rem;
+  font-size: 0.95rem;
 }
 
 .lede {
@@ -170,6 +178,18 @@ select:focus-visible {
   padding: 20px;
   margin-bottom: 20px;
   animation: rise var(--base) var(--ease) both;
+}
+
+.panel-templates {
+  background: rgba(26, 32, 129, 0.38);
+  border: 1px solid rgba(120, 140, 255, 0.35);
+  box-shadow: inset 4px 0 0 0 #6b7cff;
+}
+
+.panel-cards {
+  background: rgba(22, 70, 45, 0.4);
+  border: 1px solid rgba(59, 165, 93, 0.4);
+  box-shadow: inset 4px 0 0 0 var(--marked);
 }
 
 .stack {
@@ -253,6 +273,15 @@ textarea {
 
 .btn.danger {
   background: var(--danger);
+}
+
+.btn.share {
+  background: var(--share);
+  color: var(--share-text);
+}
+
+.btn.share:hover {
+  filter: brightness(1.08);
 }
 
 .btn.btn-compact {
